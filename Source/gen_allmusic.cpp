@@ -20,8 +20,11 @@
 
 
 #define PLUGIN_TITLE    "Allmusic Hotkey Winamp Plugin"
-#define PLUGIN_VERSION  "1.0"
+#define PLUGIN_VERSION  "1.1 BETA"
 
+#define OPT1_ARTIST  1
+#define OPT1_ALBUM   2
+#define OPT1_SONG    3
 
 
 int init();
@@ -35,8 +38,10 @@ LRESULT CALLBACK WndprocMain( HWND hwnd, UINT message, WPARAM wp, LPARAM lp );
 
 int IPC_GEN_HOTKEYS_ADD;
 int IPC_GEN_ALLMUSIC_ARTIST;
+int IPC_GEN_ALLMUSIC_ALBUM;
+int IPC_GEN_ALLMUSIC_SONG;
 
-const char * szUrlFormat = "http://www.allmusic.com/cg/amg.dll?SQL=%s&OPT1=1&Submit=Go&P=amg";
+const char * szUrlFormat = "http://www.allmusic.com/cg/amg.dll?SQL=%s&OPT1=%i&Submit=Go&P=amg";
 
 
 
@@ -54,30 +59,48 @@ HWND & hMain = plugin.hwndParent;
 
 
 
-void BrowseArtist()
+void BrowseAllmusic( int opt1 )
 {
 	// Get current index
 	const LRESULT iPos = SendMessage( hMain, WM_WA_IPC, 0, IPC_GETLISTPOS );
+
 	
 	// Get filename
 	char * szFilename = ( char * )SendMessage( hMain, WM_WA_IPC, iPos, IPC_GETPLAYLISTFILE );
 	if( !szFilename ) return;
+
 	
 	// Get artist
-	char szInitialArtist[ 1000 ] = "";
+	char szUnescaped[ 1000 ] = "";
 	extendedFileInfoStruct info;
 	info.filename  = szFilename;
-	info.metadata  = "artist";
-	info.ret       = szInitialArtist;
-	info.retlen    = sizeof( szInitialArtist );
+	
+	switch( opt1 )
+	{
+	case OPT1_SONG:		info.metadata = "title"; break;
+	case OPT1_ALBUM:	info.metadata = "album"; break;
+	default:			info.metadata = "artist"; break;
+	}
+	
+	info.ret       = szUnescaped;
+	info.retlen    = sizeof( szUnescaped );
 	const bool bExInfoSupported = ( SendMessage( hMain, WM_WA_IPC, ( WPARAM )&info, IPC_GET_EXTENDED_FILE_INFO ) == 1 );
 	if( !bExInfoSupported ) return;
 
+
 	// Make URL
-	char * szEscapedArtist = curl_escape( szInitialArtist, strlen( szInitialArtist ) );
-	char * szFinalUrl = new char[ strlen( szUrlFormat ) + strlen( szEscapedArtist ) ];
-	wsprintf( szFinalUrl, szUrlFormat, szEscapedArtist );
-	curl_free( szEscapedArtist );
+/*
+	char * szEscaped = curl_escape( szUnescaped, strlen( szUnescaped ) );
+	char * szFinalUrl = new char[ strlen( szUrlFormat ) + strlen( szEscaped ) ];
+	wsprintf( szFinalUrl, szUrlFormat, szEscaped, opt1 );
+	curl_free( szEscaped );
+*/
+	// Poor in place escape - let's see if that works better
+	const int iLen = strlen( szUnescaped );
+	for( int i = 0; i < iLen; i++ ) { if( szUnescaped[ i ] == ' ' ) { szUnescaped[ i ] = '+'; } }
+	char * szFinalUrl = new char[ strlen( szUrlFormat ) + iLen ];
+	wsprintf( szFinalUrl, szUrlFormat, szUnescaped, opt1 );
+
 
 	// Show URL
 	SendMessage( hMain, WM_WA_IPC, 0, IPC_MBOPENREAL );
@@ -94,7 +117,15 @@ LRESULT CALLBACK WndprocMain( HWND hwnd, UINT message, WPARAM wp, LPARAM lp )
 	case WM_WA_IPC:
 		if( lp == IPC_GEN_ALLMUSIC_ARTIST )
 		{
-			BrowseArtist();
+			BrowseAllmusic( OPT1_ARTIST );
+		}
+		else if( lp == IPC_GEN_ALLMUSIC_ALBUM )
+		{
+			BrowseAllmusic( OPT1_ALBUM );
+		}
+		else if( lp == IPC_GEN_ALLMUSIC_SONG )
+		{
+			BrowseAllmusic( OPT1_SONG );
 		}
 		break;
 
@@ -107,20 +138,33 @@ LRESULT CALLBACK WndprocMain( HWND hwnd, UINT message, WPARAM wp, LPARAM lp )
 int init()
 {
 	// Get message IDs
-	IPC_GEN_ALLMUSIC_ARTIST  = SendMessage( hMain, WM_WA_IPC, ( WPARAM )"IPC_GEN_ALLMUSIC_ARTIST", IPC_REGISTER_WINAMP_IPCMESSAGE );
 	IPC_GEN_HOTKEYS_ADD      = SendMessage( hMain, WM_WA_IPC, ( WPARAM )"GenHotkeysAdd", IPC_REGISTER_WINAMP_IPCMESSAGE );
+	IPC_GEN_ALLMUSIC_ARTIST  = SendMessage( hMain, WM_WA_IPC, ( WPARAM )"IPC_GEN_ALLMUSIC_ARTIST", IPC_REGISTER_WINAMP_IPCMESSAGE );
+	IPC_GEN_ALLMUSIC_ALBUM   = SendMessage( hMain, WM_WA_IPC, ( WPARAM )"IPC_GEN_ALLMUSIC_ALBUM", IPC_REGISTER_WINAMP_IPCMESSAGE );
+	IPC_GEN_ALLMUSIC_SONG    = SendMessage( hMain, WM_WA_IPC, ( WPARAM )"IPC_GEN_ALLMUSIC_SONG", IPC_REGISTER_WINAMP_IPCMESSAGE );
 
 
 	// Add hotkey
 	genHotkeysAddStruct hotkey;
 	ZeroMemory( &hotkey, sizeof( genHotkeysAddStruct ) );
-	hotkey.name    = "Allmusic: Browse for Artist";
 	hotkey.flags   = 0;
 	hotkey.uMsg    = WM_WA_IPC;
 	hotkey.wParam  = 0;
-	hotkey.lParam  = IPC_GEN_ALLMUSIC_ARTIST;
-	hotkey.id      = "IPC_GEN_ALLMUSIC_ARTIST";
 	hotkey.wnd     = 0;
+
+	hotkey.name    = "Allmusic: Browse for Artist";
+	hotkey.id      = "IPC_GEN_ALLMUSIC_ARTIST";
+	hotkey.lParam  =  IPC_GEN_ALLMUSIC_ARTIST;
+	SendMessage( hMain, WM_WA_IPC, ( WPARAM )&hotkey, IPC_GEN_HOTKEYS_ADD );
+
+	hotkey.name    = "Allmusic: Browse for Album";
+	hotkey.id      = "IPC_GEN_ALLMUSIC_ALBUM";
+	hotkey.lParam  =  IPC_GEN_ALLMUSIC_ALBUM;
+	SendMessage( hMain, WM_WA_IPC, ( WPARAM )&hotkey, IPC_GEN_HOTKEYS_ADD );
+
+	hotkey.name    = "Allmusic: Browse for Song";
+	hotkey.id      = "IPC_GEN_ALLMUSIC_SONG";
+	hotkey.lParam  =  IPC_GEN_ALLMUSIC_SONG;
 	SendMessage( hMain, WM_WA_IPC, ( WPARAM )&hotkey, IPC_GEN_HOTKEYS_ADD );
 
 
