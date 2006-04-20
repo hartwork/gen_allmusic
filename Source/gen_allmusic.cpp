@@ -11,7 +11,8 @@
 
 
 #define WIN32_LEAN_AND_MEAN
-#include <windows.h> 
+#include <windows.h>
+#include <malloc.h>
 #include "Winamp/Gen.h"
 #include "Winamp/wa_hotkeys.h" 
 #include "Winamp/wa_ipc.h" 
@@ -20,7 +21,7 @@
 
 
 #define PLUGIN_TITLE    "Allmusic Hotkey Winamp Plugin"
-#define PLUGIN_VERSION  "1.1 BETA"
+#define PLUGIN_VERSION  "1.3 BETA"
 
 #define OPT1_ARTIST  1
 #define OPT1_ALBUM   2
@@ -41,7 +42,12 @@ int IPC_GEN_ALLMUSIC_ARTIST;
 int IPC_GEN_ALLMUSIC_ALBUM;
 int IPC_GEN_ALLMUSIC_SONG;
 
-const char * szUrlFormat = "http://www.allmusic.com/cg/amg.dll?SQL=%s&OPT1=%i&Submit=Go&P=amg";
+char * szLastFile = NULL;
+char * szLastUrl = NULL;
+
+
+
+const char * const szUrlFormat = "http://www.allmusic.com/cg/amg.dll?SQL=%s&OPT1=%i&Submit=Go&P=amg";
 
 
 
@@ -77,8 +83,8 @@ void BrowseAllmusic( int opt1 )
 	
 	switch( opt1 )
 	{
-	case OPT1_SONG:		info.metadata = "title"; break;
-	case OPT1_ALBUM:	info.metadata = "album"; break;
+	case OPT1_SONG:		info.metadata = "title";  break;
+	case OPT1_ALBUM:	info.metadata = "album";  break;
 	default:			info.metadata = "artist"; break;
 	}
 	
@@ -95,11 +101,37 @@ void BrowseAllmusic( int opt1 )
 	wsprintf( szFinalUrl, szUrlFormat, szEscaped, opt1 );
 	curl_free( szEscaped );
 */
-	// Poor in place escape - let's see if that works better
+	// Poor in-place escape - let's see if that works better
 	const int iLen = strlen( szUnescaped );
-	for( int i = 0; i < iLen; i++ ) { if( szUnescaped[ i ] == ' ' ) { szUnescaped[ i ] = '+'; } }
+	for( int i = 0; i < iLen; i++ ) { if( szUnescaped[ i ] == ' ' ) { szUnescaped[ i ] = '|'; } }
 	char * szFinalUrl = new char[ strlen( szUrlFormat ) + iLen ];
 	wsprintf( szFinalUrl, szUrlFormat, szUnescaped, opt1 );
+	
+	// Update necessary?
+	if( szLastUrl )
+	{
+		// Same URL?
+		if( !strcmp( szFinalUrl, szLastUrl ) )
+		{
+			// Very same URL again
+			return;
+		}
+		else
+		{
+			// New URL
+			const int iBytesToCopy = sizeof( char ) * ( strlen( szFinalUrl ) + 1 );
+			/* if( szLastUrl ) */ free( szLastUrl );
+			szLastUrl = ( char * )malloc( iBytesToCopy );
+			memcpy( szLastUrl, szFinalUrl, iBytesToCopy );
+		}
+	}
+	else
+	{
+		// First URL ever
+		const int iBytesToCopy = sizeof( char ) * ( strlen( szFinalUrl ) + 1 );
+		szLastUrl = ( char * )malloc( iBytesToCopy );
+		memcpy( szLastUrl, szFinalUrl, iBytesToCopy );
+	}
 
 
 	// Show URL
@@ -115,20 +147,64 @@ LRESULT CALLBACK WndprocMain( HWND hwnd, UINT message, WPARAM wp, LPARAM lp )
 	switch( message )
 	{
 	case WM_WA_IPC:
-		if( lp == IPC_GEN_ALLMUSIC_ARTIST )
+		switch( lp )
 		{
-			BrowseAllmusic( OPT1_ARTIST );
-		}
-		else if( lp == IPC_GEN_ALLMUSIC_ALBUM )
-		{
-			BrowseAllmusic( OPT1_ALBUM );
-		}
-		else if( lp == IPC_GEN_ALLMUSIC_SONG )
-		{
-			BrowseAllmusic( OPT1_SONG );
-		}
-		break;
+		case IPC_CB_MISC:
+			// Start of playback?
+			if( wp != IPC_CB_MISC_STATUS ) break;
+			if( SendMessage( hwnd, WM_WA_IPC, 0, IPC_ISPLAYING ) != 1 ) break;
+			if( SendMessage( hwnd, WM_WA_IPC, 0, IPC_GETOUTPUTTIME ) >= 0 )
+			{
+				const char * const szFile = ( char * )SendMessage(
+					hwnd,
+					WM_WA_IPC,
+					SendMessage( hwnd, WM_WA_IPC, 0, IPC_GETLISTPOS ),
+					IPC_GETPLAYLISTFILE
+				);
+				
+				if( szFile )
+				{
+					if( !szLastFile )
+					{
+						// First file ever
+						const int iBytesToCopy = sizeof( char ) * ( strlen( szFile ) + 1 );
+						szLastFile = ( char * )malloc( iBytesToCopy );
+						memcpy( szLastFile, szFile, iBytesToCopy );
 
+						BrowseAllmusic( OPT1_ARTIST );	
+					}
+					else if( strcmp( szLastFile, szFile ) )
+					{
+						// New file
+						const int iBytesToCopy = sizeof( char ) * ( strlen( szFile ) + 1 );
+						/* if( szLastFile ) */ free( szLastFile );
+						szLastFile = ( char * )malloc( iBytesToCopy );
+						memcpy( szLastFile, szFile, iBytesToCopy );
+
+						BrowseAllmusic( OPT1_ARTIST );	
+					}
+				}
+			}
+			break;
+				
+		default:
+			{
+				if( lp == IPC_GEN_ALLMUSIC_ARTIST )
+				{
+					BrowseAllmusic( OPT1_ARTIST );
+				}
+				else if( lp == IPC_GEN_ALLMUSIC_ALBUM )
+				{
+					BrowseAllmusic( OPT1_ALBUM );
+				}
+				else if( lp == IPC_GEN_ALLMUSIC_SONG )
+				{
+					BrowseAllmusic( OPT1_SONG );
+				}
+			}
+			break;
+		
+		}
 	}
 	return CallWindowProc( WndprocMainBackup, hwnd, message, wp, lp );
 }
@@ -168,6 +244,11 @@ int init()
 	SendMessage( hMain, WM_WA_IPC, ( WPARAM )&hotkey, IPC_GEN_HOTKEYS_ADD );
 
 
+	// Deny Winamp to refresh the browser itself on track change.
+	// Note: The initial page is shown nevertheless - no idea why.
+	SendMessage( hMain, WM_WA_IPC, 1, IPC_MBBLOCK );
+
+
 	// Exchange window procedure
 	WndprocMainBackup = ( WNDPROC )GetWindowLong( hMain, GWL_WNDPROC );
 	if( WndprocMainBackup != NULL )
@@ -193,13 +274,14 @@ void config()
 		"About",
 		MB_ICONINFORMATION
 	);
-} 
+}
 
 
 
 void quit()
 {
-
+	if( szLastFile ) free( szLastFile );
+	if( szLastUrl ) free( szLastUrl );
 }
 
 
