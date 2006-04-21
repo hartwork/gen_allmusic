@@ -17,11 +17,9 @@
 #include "Winamp/wa_hotkeys.h" 
 #include "Winamp/wa_ipc.h" 
 
-#include "escape/escape.h"
-
 
 #define PLUGIN_TITLE    "Allmusic Hotkey Winamp Plugin"
-#define PLUGIN_VERSION  "1.3 BETA"
+#define PLUGIN_VERSION  "1.4"
 
 #define OPT1_ARTIST  1
 #define OPT1_ALBUM   2
@@ -65,7 +63,7 @@ HWND & hMain = plugin.hwndParent;
 
 
 
-void BrowseAllmusic( int opt1 )
+void BrowseAllmusic( int opt1, bool bForce )
 {
 	// Get current index
 	const LRESULT iPos = SendMessage( hMain, WM_WA_IPC, 0, IPC_GETLISTPOS );
@@ -95,13 +93,6 @@ void BrowseAllmusic( int opt1 )
 
 
 	// Make URL
-/*
-	char * szEscaped = curl_escape( szUnescaped, strlen( szUnescaped ) );
-	char * szFinalUrl = new char[ strlen( szUrlFormat ) + strlen( szEscaped ) ];
-	wsprintf( szFinalUrl, szUrlFormat, szEscaped, opt1 );
-	curl_free( szEscaped );
-*/
-	// Poor in-place escape - let's see if that works better
 	const int iLen = strlen( szUnescaped );
 	for( int i = 0; i < iLen; i++ ) { if( szUnescaped[ i ] == ' ' ) { szUnescaped[ i ] = '|'; } }
 	char * szFinalUrl = new char[ strlen( szUrlFormat ) + iLen ];
@@ -114,7 +105,11 @@ void BrowseAllmusic( int opt1 )
 		if( !strcmp( szFinalUrl, szLastUrl ) )
 		{
 			// Very same URL again
-			return;
+			if( !bForce )
+			{
+				delete [] szFinalUrl;
+				return;
+			}
 		}
 		else
 		{
@@ -135,7 +130,7 @@ void BrowseAllmusic( int opt1 )
 
 
 	// Show URL
-	SendMessage( hMain, WM_WA_IPC, 0, IPC_MBOPENREAL );
+	if( bForce ) SendMessage( hMain, WM_WA_IPC, 0, IPC_MBOPENREAL );
 	SendMessage( hMain, WM_WA_IPC, ( WPARAM )szFinalUrl, IPC_MBOPENREAL );
 	delete [] szFinalUrl;
 }
@@ -171,7 +166,7 @@ LRESULT CALLBACK WndprocMain( HWND hwnd, UINT message, WPARAM wp, LPARAM lp )
 						szLastFile = ( char * )malloc( iBytesToCopy );
 						memcpy( szLastFile, szFile, iBytesToCopy );
 
-						BrowseAllmusic( OPT1_ARTIST );	
+						BrowseAllmusic( OPT1_ARTIST, false );	
 					}
 					else if( strcmp( szLastFile, szFile ) )
 					{
@@ -181,7 +176,7 @@ LRESULT CALLBACK WndprocMain( HWND hwnd, UINT message, WPARAM wp, LPARAM lp )
 						szLastFile = ( char * )malloc( iBytesToCopy );
 						memcpy( szLastFile, szFile, iBytesToCopy );
 
-						BrowseAllmusic( OPT1_ARTIST );	
+						BrowseAllmusic( OPT1_ARTIST, false );	
 					}
 				}
 			}
@@ -191,15 +186,15 @@ LRESULT CALLBACK WndprocMain( HWND hwnd, UINT message, WPARAM wp, LPARAM lp )
 			{
 				if( lp == IPC_GEN_ALLMUSIC_ARTIST )
 				{
-					BrowseAllmusic( OPT1_ARTIST );
+					BrowseAllmusic( OPT1_ARTIST, true );
 				}
 				else if( lp == IPC_GEN_ALLMUSIC_ALBUM )
 				{
-					BrowseAllmusic( OPT1_ALBUM );
+					BrowseAllmusic( OPT1_ALBUM, true );
 				}
 				else if( lp == IPC_GEN_ALLMUSIC_SONG )
 				{
-					BrowseAllmusic( OPT1_SONG );
+					BrowseAllmusic( OPT1_SONG, true );
 				}
 			}
 			break;
